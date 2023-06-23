@@ -1,60 +1,25 @@
-const httpRequestManager = {
-    config: {
+const httpModule = ( function( ) {
+    // Private variables and functions
+    const config = {
         baseUrl: window.location.origin
         , headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': "application/json"
         }
-    }
-    , setBaseUrl: function( baseUrl ) { this.config.baseUrl = baseUrl; }
-    , setHeaders: function( headers ) { this.config.headers = headers; }
-    , get: function( path ) { return this.request( 'GET', path ); }
-    , post: function( path, data ) { return this.request( 'POST', path, data ); }
-    , postFile: function( path, payload, files ) {
-        const formData = new FormData( );
-        formData.append( 'payload', JSON.stringify( payload ) );
-        for ( let i = 0; i < files.length; i++ ) {
-            formData.append( 'files', files[ i ] );
-        }
+    };
 
-        const headers = {
-            ...this.config.headers
-            , 'Content-Type': 'multipart/form-data'
-        };
+    function setBaseUrl( baseUrl ) { config.baseUrl = baseUrl; }
 
-        const options = {
-            method: 'POST'
-            , body: formData
-            , headers: headers
-        };
+    function setHeaders( headers ) { config.headers = headers; }
 
-        return this.executeRequest( path, options );
-    }
-    , put: function( path, data ) { return this.request( 'PUT', path, data ); }
-    , delete: function( path ) { return this.request( 'DELETE', path ); }
-    , request: function( method, path, data, headers ) {
-        const options = {
-            method: method
-            , headers: headers || this.config.headers
-            , body: JSON.stringify( data )
-        };
-
-        return new Promise( (resolve, reject) => {
-            this.executeRequest( path, options )
-                .then( (response) => { resolve( response ); } )
-                .catch( (error) => {
-                    console.log( `${ method } request error:`, error );
-                    reject( error );
-                } );
-        } );
-    }
-    , getFullPath: function( path ) {
-        if ( this.config.baseUrl ) {
-            return this.config.baseUrl + path;
+    function getFullPath( path ) {
+        if ( config.baseUrl ) {
+            return config.baseUrl + path;
         }
         return path;
     }
-    , executeRequest: function( path, options ) {
-        const fullPath = this.getFullPath( path );
+
+    function executeRequest( path, options ) {
+        const fullPath = getFullPath( path );
         return fetch( fullPath, options )
             .then( (response) => {
                 if ( !response.ok ) {
@@ -76,147 +41,248 @@ const httpRequestManager = {
                     } );
             } );
     }
-};
 
-const pageManager = ( function( ) {
+    function request( method, path, data, headers ) {
+        const options = {
+            method: method
+            , headers: headers || config.headers
+            , body: JSON.stringify( data )
+        };
+
+        return new Promise( (resolve, reject) => {
+            executeRequest( path, options )
+                .then( (response) => { resolve( response ); } )
+                .catch( (error) => {
+                    console.log( `${ method } request error:`, error );
+                    reject( error );
+                } );
+        } );
+    }
+
+    // Public API
+    return {
+        config: config
+        , setBaseUrl: setBaseUrl
+        , setHeaders: setHeaders
+        , get: function( path ) { return request( "GET", path ); }
+        , post: function( path, data ) { return request( "POST", path, data ); }
+        , postFile: function( path, payload, files ) {
+            const formData = new FormData( );
+            formData.append( "payload", JSON.stringify( payload ) );
+            for ( let i = 0; i < files.length; i++ ) {
+                formData.append( "files", files[ i ] );
+            }
+
+            const headers = {
+                ...config.headers
+                , 'Content-Type': "multipart/form-data"
+            };
+
+            const options = {
+                method: "POST"
+                , body: formData
+                , headers: headers
+            };
+
+            return executeRequest( path, options );
+        }
+        , put: function( path, data ) { return request( "PUT", path, data ); }
+        , delete: function( path ) { return request( "DELETE", path ); }
+    };
+} )( );
+
+const formModule = ( function( ) {
     // Private variables
     const bindings = {};
 
     // Private methods
+    function handleFormSubmission( event ) {
+        event.preventDefault( );
 
-    // Handle form submissions
-    function handleFormSubmission( form ) {
+        const form = event.target;
         const action = form.getAttribute( "action" );
+        const method = form.getAttribute( "method" );
         const enctype = form.getAttribute( "enctype" );
+
         const data = new FormData( form );
+        const files = [ ];
 
         if ( enctype === "multipart/form-data" ) {
-            // Form submission with files
-            const payload = {};
-            for ( const [ key, value ] of data.entries( ) ) {
-                payload[ key ] = value;
-            }
-            const files = Array.from( data.getAll( "files" ) );
-            httpRequestManager
-                .postFile( action, payload, files )
-                .then( function( response ) {
-                    if ( response.ok ) {
-                        // Trigger a custom success event
-                        const successEvent = new CustomEvent( "formSubmissionSuccess"
-                            , {
-                                detail: { response, formId: form.id }
-                            } );
-                        form.dispatchEvent( successEvent );
-                    } else {
-                        // Trigger a custom error event
-                        const errorEvent = new CustomEvent( "formSubmissionError"
-                            , {
-                                detail: { response, formId: form.id }
-                            } );
-                        form.dispatchEvent( errorEvent );
-                    }
-                } )
-                .then( () => {
-                    //destroy form bindings
-                    destroyFormBindings( form.id );
-                } )
-                .catch( function( error ) {
-                    // Trigger a custom error event
-                    const errorEvent = new CustomEvent( "formSubmissionError"
-                        , {
-                            detail: { error, formId: form.id }
-                        } );
-                    form.dispatchEvent( errorEvent );
-
-                    console.error( "Form submission error:", error );
-                } );
-        } else {
-            // Normal form submission
-            const jsonData = {};
-            for ( const [ key, value ] of data.entries( ) ) {
-                jsonData[ key ] = value;
-            }
-            httpRequestManager
-                .post( action, jsonData )
-                .then( function( response ) {
-                    if ( response.ok ) {
-                        // Trigger a custom success event
-                        const successEvent = new CustomEvent( "formSubmissionSuccess"
-                            , {
-                                detail: { response, formId: form.id }
-                            } );
-                        form.dispatchEvent( successEvent );
-                    } else {
-                        // Trigger a custom error event
-                        const errorEvent = new CustomEvent( "formSubmissionError"
-                            , {
-                                detail: { response, formId: form.id }
-                            } );
-                        form.dispatchEvent( errorEvent );
-                    }
-                } )
-                .then( () => {
-                    //destroy form bindings 
-                    destroyFormBindings( form.id );
-                } )
-                .catch( function( error ) {
-                    // Trigger a custom error event
-                    const errorEvent = new CustomEvent( "formSubmissionError"
-                        , {
-                            detail: { error, formId: form.id }
-                        } );
-                    form.dispatchEvent( errorEvent );
-
-                    console.error( "Form submission error:", error );
-                } );
-        }
-
-        function destroyFormBindings( id ) {
-            const formBindings = bindings[ `#${ id }` ];
-            if ( formBindings ) {
-                for ( const event in formBindings ) {
-                    if ( formBindings.hasOwnProperty( event ) ) {
-                        formBindings[ event ].forEach( (handler) => { form.removeEventListener( event, handler ); } );
-
-                        delete bindings[ `#${ id }` ];
-                    }
+            const fileInputs = form.querySelectorAll( "input[type='file']" );
+            for ( let i = 0; i < fileInputs.length; i++ ) {
+                const fileInput = fileInputs[ i ];
+                for ( let j = 0; j < fileInput.files.length; j++ ) {
+                    files.push( fileInput.files[ j ] );
                 }
             }
         }
+
+        httpModule.postFile( action, data, files )
+            .then( response => {
+                const eventName = `${ method.toUpperCase( ) }_SUCCESS`;
+                if ( bindings[ eventName ] ) {
+                    bindings[ eventName ].forEach( callback => callback( response ) );
+                }
+            } )
+            .catch( error => {
+                const eventName = `${ method.toUpperCase( ) }_ERROR`;
+                if ( bindings[ eventName ] ) {
+                    bindings[ eventName ].forEach( callback => callback( error ) );
+                }
+            } );
     }
 
-    // Render a partial view
+    // Public methods
+    return {
+        bindForm: function( formId ) {
+            const form = document.getElementById( formId );
+            if ( form ) {
+                form.addEventListener( "submit"
+                    , (e) => {
+                        e.preventDefault( );
+                        handleFormSubmission( e );
+                    } );
+            }
+        }
+        , on: function( eventName, callback ) {
+            if ( !bindings[ eventName ] ) {
+                bindings[ eventName ] = [ ];
+            }
+            bindings[ eventName ].push( callback );
+        }
+    };
+} )( );
+
+const storageModule = ( function( ) {
+    // Private methods
+    function isStorageSupported( storage ) {
+        try {
+            const testKey = "__storageModule__";
+            storage.setItem( testKey, testKey );
+            storage.removeItem( testKey );
+            return true;
+        } catch ( e ) {
+            return false;
+        }
+    }
+
+    // Public methods
+    return {
+        setItem: function( key, value, storageType ) {
+            const storage = storageType === "localStorage" ? localStorage : sessionStorage;
+            if ( isStorageSupported( storage ) ) {
+                storage.setItem( key, JSON.stringify( value ) );
+            } else {
+                // Fallback for unsupported browsers
+                // You can implement an alternative storage mechanism here
+            }
+        }
+        , getItem: function( key, storageType ) {
+            const storage = storageType === "localStorage" ? localStorage : sessionStorage;
+            if ( isStorageSupported( storage ) ) {
+                const value = storage.getItem( key );
+                return value ? JSON.parse( value ) : null;
+            } else {
+                // Fallback for unsupported browsers
+                // You can implement an alternative storage mechanism here
+                return null;
+            }
+        }
+        , removeItem: function( key, storageType ) {
+            const storage = storageType === "localStorage" ? localStorage : sessionStorage;
+            if ( isStorageSupported( storage ) ) {
+                storage.removeItem( key );
+            } else {
+                // Fallback for unsupported browsers
+                // You can implement an alternative storage mechanism here
+            }
+        }
+        , clear: function( storageType ) {
+            const storage = storageType === "localStorage" ? localStorage : sessionStorage;
+            if ( isStorageSupported( storage ) ) {
+                storage.clear( );
+            } else {
+                // Fallback for unsupported browsers
+                // You can implement an alternative storage mechanism here
+            }
+        }
+    };
+} )( );
+
+const partialViewModule = ( function( ) {
+    // Private variables and functions
+    const partialViews = {};
+
     function renderPartial( containerSelector, url ) {
         return new Promise( function( resolve, reject ) {
-            const container = document.getElementById( containerSelector );
-
-            if ( container ) {
-                fetch( url )
-                    .then( function( response ) {
-                        if ( response.ok ) {
-                            return response.json( );
-                        } else {
-                            throw new Error( "Failed to fetch partial view." );
-                        }
-                    } )
-                    .then( function( partialHtml ) {
-                        container.innerHTML = partialHtml;
-                        resolve( );
-                    } )
-                    .catch( function( error ) { reject( error ); } );
-            } else {
+            const container = document.querySelector( containerSelector );
+            if ( !container ) {
                 reject( new Error( "Container element not found." ) );
+                return;
             }
+
+            fetch( url )
+                .then( function( response ) {
+                    if ( response.ok ) {
+                        return response.text( );
+                    } else {
+                        throw new Error( "Failed to fetch partial view." );
+                    }
+                } )
+                .then( function( partialHtml ) {
+                    container.innerHTML = partialHtml;
+                    resolve( );
+                } )
+                .catch( function( error ) { reject( error ); } );
         } );
     }
 
     // Public methods
+    return {
+        registerPartialView: function( partialViewName, partialViewContent ) {
+            partialViews[ partialViewName ] = partialViewContent;
+        }
+        , renderPartial: renderPartial
+    };
+} )( );
+
+const pageManager = ( function( httpModule, formModule, storageModule, partialViewModule ) {
+    // Private variables and functions
+    const bindings = {};
+
+    // Public API
     const basePageMethods = {
-        // Register a binding
-        registerBinding: function( selectorOrElement, event, handler ) {
-            const selectors = Array.isArray( selectorOrElement )
-                                  ? selectorOrElement
-                                  : [ selectorOrElement ];
+        init(...externalFunctions) {
+            for ( const selectorOrElement in bindings ) {
+                if ( bindings.hasOwnProperty( selectorOrElement ) ) {
+                    const events = bindings[ selectorOrElement ];
+                    const element = Array.isArray( selectorOrElement )
+                                        ? selectorOrElement
+                                        : document.querySelectorAll( selectorOrElement );
+                    element.forEach( (element) => {
+                        for ( const event in events ) {
+                            if ( events.hasOwnProperty( event ) ) {
+                                element.addEventListener( event, events[ event ] );
+                            }
+                        }
+                    } );
+                }
+            }
+            
+            // Call external functions
+            externalFunctions.forEach( (externalFunction) => {
+                if ( typeof externalFunction === "function" ) {
+                    externalFunction( );
+                }
+            } );
+        }
+        , extend( extension ) {
+            if ( typeof extension === "object" ) {
+                Object.assign( this, extension );
+            }
+        }
+        , registerBinding( selectorOrElement, event, handler ) {
+            const selectors = Array.isArray( selectorOrElement ) ? selectorOrElement : [ selectorOrElement ];
 
             selectors.forEach( (selector) => {
                 if ( !bindings[ selector ] ) {
@@ -228,9 +294,8 @@ const pageManager = ( function( ) {
                 }
 
                 let elements;
-
                 if ( selector.startsWith( "#" ) ) {
-                    const id = selector.slice( 1 ); // Remove the '#' prefix
+                    const id = selector.substring( 1 );
                     const element = document.getElementById( id );
                     elements = element ? [ element ] : [ ];
                 } else {
@@ -238,34 +303,17 @@ const pageManager = ( function( ) {
                 }
 
                 elements.forEach( (element) => {
-                    const eventHandlers = bindings[ selector ][ event ];
-                    const existingHandler = eventHandlers.find( (h) => h === handler );
+                    const eventHandler = bindings[ selector ][ event ];
+                    const existingHandler = eventHandler.find( (h) => h === handler );
 
                     if ( !existingHandler ) {
-                        eventHandlers.push( handler );
+                        eventHandler.push( handler );
                         element.addEventListener( event, handler );
                     }
                 } );
             } );
         }
-        ,
-        // Handle form submissions for all forms on the page
-        handleFormSubmissions: function( ) {
-            const forms = document.getElementsByTagName( "form" );
-            for ( let i = 0; i < forms.length; i++ ) {
-                const form = forms[ i ];
-                form.addEventListener(
-                    "submit"
-                    , function( e ) {
-                        e.preventDefault( );
-                        handleFormSubmission( form );
-                    }
-                );
-            }
-        }
-        ,
-        // DeRegister all bindings for a selector
-        deRegisterBindings: function( selector ) {
+        , deRegisterBindings( selector ) {
             if ( bindings[ selector ] ) {
                 const events = Object.keys( bindings[ selector ] );
 
@@ -286,118 +334,19 @@ const pageManager = ( function( ) {
                 }
             }
         }
-        ,
-        // New method to register a form dynamically
-        registerForm: function( form ) {
-            function handleFormSubmit( e ) {
-                e.preventDefault( );
-                handleFormSubmission( e.target );
-            }
+        , registerForm( id ) { formModule.bindForm( id ); }
+        , setStorage( key, value, store = "localStorage" ) { storageModule.setItem( key, value, store ); }
+        , getStorage( key, store = "localStorage" ) { return storageModule.getItem( key, store ); }
+        , removeStorage( key, store = "localStorage" ) { storageModule.removeItem( key, store ); }
+        , clearStorage( store ) { storageModule.clear( store ); }
+        , renderPartial( containerId, path ) { partialViewModule.renderPartial( containerId, path ); }
+        , get( path ) { return httpModule.get( path ); }
+        , post( path, payload ) { return httpModule.post( path, payload ); }
+        , put( path, payload ) { return httpModule.put( path, payload ); }
+        , delete(path) { return httpModule.delete( path ); }
+        , postFile( path, payload, files ) { return httpModule.postFile( path, payload, files ); }
+    }
 
-            if ( form instanceof HTMLFormElement ) {
-                form.addEventListener( "submit", handleFormSubmit );
-            } else {
-                throw new Error( "Invalid form element." );
-            }
-        }
-        ,
-        // Set data in local storage
-        setLocalStorage: function( key, value ) { localStorage.setItem( key, JSON.stringify( value ) ); }
-        ,
-
-        // Get data from local storage
-        getLocalStorage: function( key ) {
-            const value = localStorage.getItem( key );
-            return value ? JSON.parse( value ) : null;
-        }
-        ,
-
-        // Remove data from local storage
-        removeLocalStorage: function( key ) { localStorage.removeItem( key ); }
-        ,
-
-        // Set data in session storage
-        setSessionStorage: function( key, value ) { sessionStorage.setItem( key, JSON.stringify( value ) ); }
-        ,
-
-        // Get data from session storage
-        getSessionStorage: function( key ) {
-            const value = sessionStorage.getItem( key );
-            return value ? JSON.parse( value ) : null;
-        }
-        ,
-
-        // Remove data from session storage
-        removeSessionStorage: function( key ) { sessionStorage.removeItem( key ); }
-        ,
-
-        // Make a GET request
-        get: function( path ) { return httpRequestManager.get( path ); }
-        ,
-
-        // Make a POST request
-        post: function( path, data ) { return httpRequestManager.post( path, data ); }
-        ,
-
-        // Make a POST request with files
-        postFile: function( path, payload, files ) { return httpRequestManager.postFile( path, payload, files ); }
-        ,
-
-        // Make a PUT request
-        put: function( path, data ) { return httpRequestManager.put( path, data ); }
-        ,
-
-        // Make a DELETE request
-        delete: function( path ) { return httpRequestManager.delete( path ); }
-        ,
-
-        // Initialize the page
-        init: function( ...externalFunctions ) {
-            for ( let selectorOrElement in bindings ) {
-                if ( bindings.hasOwnProperty( selectorOrElement ) ) {
-                    const events = bindings[ selectorOrElement ];
-                    const elements = Array.isArray( selectorOrElement )
-                                         ? selectorOrElement
-                                         : document.querySelectorAll( selectorOrElement );
-
-                    elements.forEach( (element) => {
-                        for ( let event in events ) {
-                            if ( events.hasOwnProperty( event ) ) {
-                                const handlers = events[ event ];
-
-                                handlers.forEach( (handler) => { element.addEventListener( event, handler ); } );
-                            }
-                        }
-                    } );
-                }
-            }
-
-            this.handleFormSubmissions( ); // Handle form submissions
-
-            // Call external functions
-            externalFunctions.forEach( fn => {
-                if ( typeof fn === "function" ) {
-                    fn( );
-                }
-            } );
-        }
-        ,
-
-        // Extend the BasePage with additional functionality
-        extend: function( extension ) {
-            if ( typeof extension === "object" ) {
-                Object.assign( this, extension );
-            }
-        }
-        ,
-
-        // Render a partial view
-        renderPartial: renderPartial
-    };
-
-    // Initialize the page
     basePageMethods.init( );
-
-    // Return the basePageMethods object
     return basePageMethods;
-} )( );
+} )( httpModule, formModule, storageModule, partialViewModule );
