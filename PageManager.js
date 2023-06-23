@@ -1,78 +1,80 @@
 const httpRequestManager = {
-    get: async function( path ) {
-        const response = await fetch( path
-            , {
-                method: "GET"
-                ,
-            } );
-
-        return this.handleResponse( response );
+    config: {
+        baseUrl: window.location.origin
+        , headers: {
+            'Content-Type': 'application/json'
+        }
     }
-    , post: async function( path, data ) {
-        const response = await fetch( path
-            , {
-                method: "POST"
-                , body: JSON.stringify( data )
-                , headers: {
-                    "Content-Type": "application/json"
-                    ,
-                }
-                ,
-            } );
-
-        return this.handleResponse( response );
-    }
-    , postFile: async function( path, payload, files ) {
+    , setBaseUrl: function( baseUrl ) { this.config.baseUrl = baseUrl; }
+    , setHeaders: function( headers ) { this.config.headers = headers; }
+    , get: function( path ) { return this.request( 'GET', path ); }
+    , post: function( path, data ) { return this.request( 'POST', path, data ); }
+    , postFile: function( path, payload, files ) {
         const formData = new FormData( );
-        formData.append( "payload", JSON.stringify( payload ) );
+        formData.append( 'payload', JSON.stringify( payload ) );
         for ( let i = 0; i < files.length; i++ ) {
-            formData.append( "files", files[ i ] );
+            formData.append( 'files', files[ i ] );
         }
 
-        const response = await fetch( path
-            , {
-                method: "POST"
-                , body: formData
-                ,
-            } );
+        const headers = {
+            ...this.config.headers
+            , 'Content-Type': 'multipart/form-data'
+        };
 
-        return this.handleResponse( response );
+        const options = {
+            method: 'POST'
+            , body: formData
+            , headers: headers
+        };
+
+        return this.executeRequest( path, options );
     }
-    , put: async function( path, data ) {
-        const response = await fetch( path
-            , {
-                method: "PUT"
-                , body: JSON.stringify( data )
-                , headers: {
-                    "Content-Type": "application/json"
-                    ,
+    , put: function( path, data ) { return this.request( 'PUT', path, data ); }
+    , delete: function( path ) { return this.request( 'DELETE', path ); }
+    , request: function( method, path, data, headers ) {
+        const options = {
+            method: method
+            , headers: headers || this.config.headers
+            , body: JSON.stringify( data )
+        };
+
+        return new Promise( (resolve, reject) => {
+            this.executeRequest( path, options )
+                .then( (response) => { resolve( response ); } )
+                .catch( (error) => {
+                    console.log( `${ method } request error:`, error );
+                    reject( error );
+                } );
+        } );
+    }
+    , getFullPath: function( path ) {
+        if ( this.config.baseUrl ) {
+            return this.config.baseUrl + path;
+        }
+        return path;
+    }
+    , executeRequest: function( path, options ) {
+        const fullPath = this.getFullPath( path );
+        return fetch( fullPath, options )
+            .then( (response) => {
+                if ( !response.ok ) {
+                    return response.json( )
+                        .then( (errorBody) => {
+                            const error = {
+                                status: response.status
+                                , statusText: response.statusText
+                                , body: errorBody
+                                ,
+                            };
+                            throw error;
+                        } );
                 }
-                ,
+                return response.json( )
+                    .then( (data) => {
+                        response.data = data;
+                        return response;
+                    } );
             } );
-
-        return this.handleResponse( response );
-    }
-    , delete: async function( path ) {
-        const response = await fetch( path
-            , {
-                method: "DELETE"
-                ,
-            } );
-
-        return this.handleResponse( response );
-    }
-    , handleResponse: async function( response ) {
-        if ( !response.ok ) {
-            const error = {
-                status: response.status
-                , statusText: response.statusText
-
-            };
-            throw error;
-        }
-
-        response[ "data" ] = await response.json( );
-        return response;
     }
 };
 
@@ -103,7 +105,6 @@ const pageManager = ( function( ) {
                         const successEvent = new CustomEvent( "formSubmissionSuccess"
                             , {
                                 detail: { response, formId: form.id }
-                                ,
                             } );
                         form.dispatchEvent( successEvent );
                     } else {
@@ -111,7 +112,6 @@ const pageManager = ( function( ) {
                         const errorEvent = new CustomEvent( "formSubmissionError"
                             , {
                                 detail: { response, formId: form.id }
-                                ,
                             } );
                         form.dispatchEvent( errorEvent );
                     }
@@ -125,9 +125,10 @@ const pageManager = ( function( ) {
                     const errorEvent = new CustomEvent( "formSubmissionError"
                         , {
                             detail: { error, formId: form.id }
-                            ,
                         } );
                     form.dispatchEvent( errorEvent );
+
+                    console.error( "Form submission error:", error );
                 } );
         } else {
             // Normal form submission
@@ -143,7 +144,6 @@ const pageManager = ( function( ) {
                         const successEvent = new CustomEvent( "formSubmissionSuccess"
                             , {
                                 detail: { response, formId: form.id }
-                                ,
                             } );
                         form.dispatchEvent( successEvent );
                     } else {
@@ -151,7 +151,6 @@ const pageManager = ( function( ) {
                         const errorEvent = new CustomEvent( "formSubmissionError"
                             , {
                                 detail: { response, formId: form.id }
-                                ,
                             } );
                         form.dispatchEvent( errorEvent );
                     }
@@ -165,9 +164,10 @@ const pageManager = ( function( ) {
                     const errorEvent = new CustomEvent( "formSubmissionError"
                         , {
                             detail: { error, formId: form.id }
-                            ,
                         } );
                     form.dispatchEvent( errorEvent );
+
+                    console.error( "Form submission error:", error );
                 } );
         }
 
