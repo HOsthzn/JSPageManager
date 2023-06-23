@@ -1,5 +1,4 @@
-// HttpRequestManager
-var httpRequestManager = {
+const httpRequestManager = {
     get: async function( path ) {
         const response = await fetch( path
             , {
@@ -10,7 +9,7 @@ var httpRequestManager = {
         return this.handleResponse( response );
     }
     , post: async function( path, data ) {
-        const response = fetch( path
+        const response = await fetch( path
             , {
                 method: "POST"
                 , body: JSON.stringify( data )
@@ -30,7 +29,7 @@ var httpRequestManager = {
             formData.append( "files", files[ i ] );
         }
 
-        const response = fetch( path
+        const response = await fetch( path
             , {
                 method: "POST"
                 , body: formData
@@ -40,7 +39,7 @@ var httpRequestManager = {
         return this.handleResponse( response );
     }
     , put: async function( path, data ) {
-        const response = fetch( path
+        const response = await fetch( path
             , {
                 method: "PUT"
                 , body: JSON.stringify( data )
@@ -54,7 +53,7 @@ var httpRequestManager = {
         return this.handleResponse( response );
     }
     , delete: async function( path ) {
-        const response = fetch( path
+        const response = await fetch( path
             , {
                 method: "DELETE"
                 ,
@@ -77,8 +76,7 @@ var httpRequestManager = {
     }
 };
 
-// BasePage
-const PageManager = ( function( ) {
+const pageManager = ( function( ) {
     // Private variables
     const bindings = {};
 
@@ -86,7 +84,6 @@ const PageManager = ( function( ) {
 
     // Handle form submissions
     function handleFormSubmission( form ) {
-        const method = form.getAttribute( "method" );
         const action = form.getAttribute( "action" );
         const enctype = form.getAttribute( "enctype" );
         const data = new FormData( form );
@@ -102,13 +99,35 @@ const PageManager = ( function( ) {
                 .postFile( action, payload, files )
                 .then( function( response ) {
                     if ( response.ok ) {
-                        // Success handling
+                        // Trigger a custom success event
+                        const successEvent = new CustomEvent( "formSubmissionSuccess"
+                            , {
+                                detail: { response, formId: form.id }
+                                ,
+                            } );
+                        form.dispatchEvent( successEvent );
                     } else {
-                        // Error handling
+                        // Trigger a custom error event
+                        const errorEvent = new CustomEvent( "formSubmissionError"
+                            , {
+                                detail: { response, formId: form.id }
+                                ,
+                            } );
+                        form.dispatchEvent( errorEvent );
                     }
                 } )
+                .then( () => {
+                    //destroy form bindings
+                    destroyFormBindings( form.id );
+                } )
                 .catch( function( error ) {
-                    // Error handling
+                    // Trigger a custom error event
+                    const errorEvent = new CustomEvent( "formSubmissionError"
+                        , {
+                            detail: { error, formId: form.id }
+                            ,
+                        } );
+                    form.dispatchEvent( errorEvent );
                 } );
         } else {
             // Normal form submission
@@ -120,38 +139,116 @@ const PageManager = ( function( ) {
                 .post( action, jsonData )
                 .then( function( response ) {
                     if ( response.ok ) {
-                        // Success handling
+                        // Trigger a custom success event
+                        const successEvent = new CustomEvent( "formSubmissionSuccess"
+                            , {
+                                detail: { response, formId: form.id }
+                                ,
+                            } );
+                        form.dispatchEvent( successEvent );
                     } else {
-                        // Error handling
+                        // Trigger a custom error event
+                        const errorEvent = new CustomEvent( "formSubmissionError"
+                            , {
+                                detail: { response, formId: form.id }
+                                ,
+                            } );
+                        form.dispatchEvent( errorEvent );
                     }
                 } )
+                .then( () => {
+                    //destroy form bindings 
+                    destroyFormBindings( form.id );
+                } )
                 .catch( function( error ) {
-                    // Error handling
+                    // Trigger a custom error event
+                    const errorEvent = new CustomEvent( "formSubmissionError"
+                        , {
+                            detail: { error, formId: form.id }
+                            ,
+                        } );
+                    form.dispatchEvent( errorEvent );
                 } );
         }
+
+        function destroyFormBindings( id ) {
+            const formBindings = bindings[ `#${ id }` ];
+            if ( formBindings ) {
+                for ( const event in formBindings ) {
+                    if ( formBindings.hasOwnProperty( event ) ) {
+                        formBindings[ event ].forEach( (handler) => { form.removeEventListener( event, handler ); } );
+
+                        delete bindings[ `#${ id }` ];
+                    }
+                }
+            }
+        }
+    }
+
+    // Render a partial view
+    function renderPartial( containerSelector, url ) {
+        return new Promise( function( resolve, reject ) {
+            const container = document.getElementById( containerSelector );
+
+            if ( container ) {
+                fetch( url )
+                    .then( function( response ) {
+                        if ( response.ok ) {
+                            return response.json( );
+                        } else {
+                            throw new Error( "Failed to fetch partial view." );
+                        }
+                    } )
+                    .then( function( partialHtml ) {
+                        container.innerHTML = partialHtml;
+                        resolve( );
+                    } )
+                    .catch( function( error ) { reject( error ); } );
+            } else {
+                reject( new Error( "Container element not found." ) );
+            }
+        } );
     }
 
     // Public methods
     const basePageMethods = {
         // Register a binding
         registerBinding: function( selectorOrElement, event, handler ) {
-            if (!bindings[selectorOrElement]) {
-                bindings[selectorOrElement] = {};
-            }
+            const selectors = Array.isArray( selectorOrElement )
+                                  ? selectorOrElement
+                                  : [ selectorOrElement ];
 
-            if (!bindings[selectorOrElement][event]) {
-                bindings[selectorOrElement][event] = [];
-            }
+            selectors.forEach( (selector) => {
+                if ( !bindings[ selector ] ) {
+                    bindings[ selector ] = {};
+                }
 
-            const elements = Array.isArray(selectorOrElement) ? selectorOrElement : document.querySelectorAll(selectorOrElement);
+                if ( !bindings[ selector ][ event ] ) {
+                    bindings[ selector ][ event ] = [ ];
+                }
 
-            elements.forEach((element) => {
-                bindings[selectorOrElement][event].push(handler);
-                element.addEventListener(event, handler);
-            });
+                let elements;
+
+                if ( selector.startsWith( "#" ) ) {
+                    const id = selector.slice( 1 ); // Remove the '#' prefix
+                    const element = document.getElementById( id );
+                    elements = element ? [ element ] : [ ];
+                } else {
+                    elements = document.querySelectorAll( selector );
+                }
+
+                elements.forEach( (element) => {
+                    const eventHandlers = bindings[ selector ][ event ];
+                    const existingHandler = eventHandlers.find( (h) => h === handler );
+
+                    if ( !existingHandler ) {
+                        eventHandlers.push( handler );
+                        element.addEventListener( event, handler );
+                    }
+                } );
+            } );
         }
         ,
-
         // Handle form submissions for all forms on the page
         handleFormSubmissions: function( ) {
             const forms = document.getElementsByTagName( "form" );
@@ -167,7 +264,43 @@ const PageManager = ( function( ) {
             }
         }
         ,
+        // DeRegister all bindings for a selector
+        deRegisterBindings: function( selector ) {
+            if ( bindings[ selector ] ) {
+                const events = Object.keys( bindings[ selector ] );
 
+                events.forEach( (event) => {
+                    const eventHandlers = bindings[ selector ][ event ];
+
+                    eventHandlers.forEach( (handler) => {
+                        const elements = document.querySelectorAll( selector );
+
+                        elements.forEach( (element) => { element.removeEventListener( event, handler ); } );
+                    } );
+
+                    delete bindings[ selector ][ event ];
+                } );
+
+                if ( Object.keys( bindings[ selector ] ).length === 0 ) {
+                    delete bindings[ selector ];
+                }
+            }
+        }
+        ,
+        // New method to register a form dynamically
+        registerForm: function( form ) {
+            function handleFormSubmit( e ) {
+                e.preventDefault( );
+                handleFormSubmission( e.target );
+            }
+
+            if ( form instanceof HTMLFormElement ) {
+                form.addEventListener( "submit", handleFormSubmit );
+            } else {
+                throw new Error( "Invalid form element." );
+            }
+        }
+        ,
         // Set data in local storage
         setLocalStorage: function( key, value ) { localStorage.setItem( key, JSON.stringify( value ) ); }
         ,
@@ -220,22 +353,22 @@ const PageManager = ( function( ) {
 
         // Initialize the page
         init: function( ...externalFunctions ) {
-            for (let selectorOrElement in bindings) {
-                if (bindings.hasOwnProperty(selectorOrElement)) {
-                    const events = bindings[selectorOrElement];
-                    const elements = Array.isArray(selectorOrElement) ? selectorOrElement : document.querySelectorAll(selectorOrElement);
+            for ( let selectorOrElement in bindings ) {
+                if ( bindings.hasOwnProperty( selectorOrElement ) ) {
+                    const events = bindings[ selectorOrElement ];
+                    const elements = Array.isArray( selectorOrElement )
+                                         ? selectorOrElement
+                                         : document.querySelectorAll( selectorOrElement );
 
-                    elements.forEach((element) => {
-                        for (let event in events) {
-                            if (events.hasOwnProperty(event)) {
-                                const handlers = events[event];
+                    elements.forEach( (element) => {
+                        for ( let event in events ) {
+                            if ( events.hasOwnProperty( event ) ) {
+                                const handlers = events[ event ];
 
-                                handlers.forEach((handler) => {
-                                    element.addEventListener(event, handler);
-                                });
+                                handlers.forEach( (handler) => { element.addEventListener( event, handler ); } );
                             }
                         }
-                    });
+                    } );
                 }
             }
 
@@ -257,6 +390,9 @@ const PageManager = ( function( ) {
             }
         }
         ,
+
+        // Render a partial view
+        renderPartial: renderPartial
     };
 
     // Initialize the page
